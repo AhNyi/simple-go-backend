@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  simple-go-backend
+  
+  Sample SAM Template for simple-go-backend
+
+Parameters:
+  DynamoDbRegion:
+    Type: String
+    Description: DynamoDB Located Region
+    Default: "us-east-1"
+  MyTableName:
+    Type: String
+    Description: DynamoDB Table Name for simpe-go-backend
+    Default: "simple-go-test"
+  SecurityGroups:
+    Type: CommaDelimitedList
+    Description: SecurityGroup Ids
+  Subnets:
+    Type: CommaDelimitedList
+    Description: Subnet Ids
+  AccessLogStreamDestinationArn:
+    Type: String
+    Description: "Kinesis data firehose logstream arn"
+  ApigatewayLogDeliveryFormat:
+    Type: String
+    Description: "Kinesis data firehose log format"
+  RowLockTimeout:
+    Type: Number
+    Description: Asset row lock timeout second
+    Default: 180
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Api:
+    AccessLogSetting:
+      DestinationArn: !Ref AccessLogStreamDestinationArn
+      Format: !Ref ApigatewayLogDeliveryFormat
+    OpenApiVersion: 3.0.2
+    MethodSettings:
+      - DataTraceEnabled: true
+        MetricsEnabled: true
+        LoggingLevel: !Ref ApiGatewayLogLevel
+        ResourcePath: "/*"
+        HttpMethod: "*"
+    TracingEnabled: true
+    Cors:
+      AllowHeaders: "'Access-Control-Allow-Headers,Access-Control-Allow-Origin, Origin,Accept, X-Requested-With, Content-Type, Access-Control-Request-Method, Access-Control-Request-Headers, Authorization'"
+      AllowOrigin: "'*'"
+  Function:
+    Timeout: 5
+    Environment:
+      Variables:
+        REGION: !Ref DynamoDbRegion
+        DB_NAME: !Ref MyTableName
+        DYNAMODB_ENDPOINT: ""
+        AWS_XRAY_SDK_DISABLED: "FALSE"
+        AWS_XRAY_CONTEXT_MISSING: "LOG_ERROR"
+        ROWLOCK_TIMEOUT: !Ref RowLockTimeout
+    VpcConfig:
+      SecurityGroupIds: !Ref SecurityGroups
+      SubnetIds: !Ref Subnets
+    Tracing: Active
+Resources:
+  platformApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowHeaders: "'Access-Control-Allow-Headers,Access-Control-Allow-Origin, Origin,Accept, X-Requested-With, Content-Type, Access-Control-Request-Method, Access-Control-Request-Headers, Authorization'"
+        AllowOrigin: "'*'"
+        AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+  
+  # Lambda Functions
+  GetContentListFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      Policies: AmazonDynamoDBReadOnlyAccess
+      CodeUri: handler/contents/indexContent
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Tracing: Active # https://docs.aws.amazon.com/lambda/latest/dg/lambda-x-ray.html
+      Events:
+        CatchAll:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            RestApiId: !Ref platformApi
+            Path: /contents/{contractId}
+            Method: GET
+  GetContentByIdFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      Policies: AmazonDynamoDBReadOnlyAccess
+      CodeUri: handler/contents/indexContentByID
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Tracing: Active # https://docs.aws.amazon.com/lambda/latest/dg/lambda-x-ray.html
+      Events:
+        CatchAll:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            RestApiId: !Ref platformApi
+            Path: /contents/{contractId}/{contentId}
+            Method: GET
+  PostContentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Policies: AmazonDynamoDBFullAccess
+      CodeUri: handler/contents/createContent
+      Handler: main
+      Runtime: go1.x
+      Tracing: Active
+      Events:
+        CatchAll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref platformApi
+            Path: /contents
+            Method: POST
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  ApiGatewayEndpointUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${platformApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+    Export:
+      Name: SimpleGoBackendApiEndpointUrl
